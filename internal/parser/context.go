@@ -68,6 +68,8 @@ func DirectChildren(node ast.Node) []ast.Node {
 		return nil
 	case *ast.ImportStr:
 		return nil
+	case *ast.ImportWASM:
+		return nil
 	case *ast.Index:
 		if node.Id != nil {
 			return nil // non-desugared dot reference
@@ -184,6 +186,8 @@ func thunkChildren(node ast.Node) []ast.Node {
 	case *ast.Import:
 		return nil
 	case *ast.ImportStr:
+		return nil
+	case *ast.ImportWASM:
 		return nil
 	case *ast.Index:
 		return nil
@@ -307,6 +311,8 @@ func specialChildren(node ast.Node) []ast.Node {
 	case *ast.Import:
 		return nil
 	case *ast.ImportStr:
+		return nil
+	case *ast.ImportWASM:
 		return nil
 	case *ast.Index:
 		return nil

@@ -139,6 +139,15 @@ func (cache *importCache) importString(importedFrom, importedPath string, i *int
 	return makeValueString(data.String()), nil
 }
 
+// ImportWASM imports a string, caches it and then returns it.
+func (cache *importCache) importWASM(importedFrom, importedPath string, i *interpreter) (valueString, error) {
+	data, _, err := cache.importData(importedFrom, importedPath)
+	if err != nil {
+		return nil, i.Error(err.Error())
+	}
+	return makeValueString(data.String()), nil
+}
+
 func nodeToPV(i *interpreter, filename string, node ast.Node) *cachedThunk {
 	env := makeInitialEnv(filename, i.baseStd)
 	return &cachedThunk{

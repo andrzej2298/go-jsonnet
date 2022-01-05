@@ -488,6 +488,10 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 		codePath := node.Loc().FileName
 		return i.importCache.importString(codePath, node.File.Value, i)
 
+	case *ast.ImportWASM:
+		codePath := node.Loc().FileName
+		return i.importCache.importWASM(codePath, node.File.Value, i)
+
 	case *ast.LiteralBoolean:
 		return makeValueBoolean(node.Value), nil
 
