@@ -5,6 +5,8 @@ go 1.13
 require (
 	github.com/fatih/color v1.10.0
 	github.com/sergi/go-diff v1.1.0
+	github.com/wasmerio/wasmer-go v1.0.4 // indirect
+	go.mongodb.org/mongo-driver v1.8.2 // indirect
 	gopkg.in/yaml.v2 v2.2.7 // indirect
 	sigs.k8s.io/yaml v1.1.0
 )
