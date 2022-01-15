@@ -17,8 +17,6 @@ func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []
 }
 
 func callFunction(wasmerInstance *wasmer.Instance, functionName string, arguments []byte) bson.Raw {
-	var rawArguments bson.Raw = arguments
-	fmt.Println(rawArguments)
 	allocate, _ := wasmerInstance.Exports.GetFunction("__jsonnet_internal_allocate")
 	deallocate, _ := wasmerInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
 	memoryExport, _ := wasmerInstance.Exports.GetMemory("memory")
@@ -38,7 +36,7 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 		}
 		// get output
 		bsonResult, _ = function(inputPointer)
-		deallocate(inputPointer, argumentsLen)
+		// deallocate(inputPointer, argumentsLen)
 	} else {
 		bsonResult, _ = function()
 	}
@@ -82,12 +80,6 @@ func makeWasmerInstance(fileDir, fileName string) (*wasmer.Instance, []string) {
 	importObject, _ := wasiEnv.GenerateImportObject(store, module)
 	instance, _ := wasmer.NewInstance(module, importObject)
 
-	// result := callFunction(instance, "__jsonnet_internal_meta_exec", []byte{})
-	// var paramNames []ast.Identifier
-	// err := result.Lookup("res").Unmarshal(&paramNames)
-	// fmt.Println(result)
-	// fmt.Println(paramNames)
-	// fmt.Println(err)
 	var functionNames []string
 
 	// lookup all function names in the module (ignore internal functions like allocate)
@@ -114,8 +106,8 @@ func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) *was
 }
 
 func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpreter) (value, error) {
-	fmt.Printf("%+v\n", arguments)
 	flatArgs := flattenArgs(arguments, wasmFunction.parameters(), []value{})
+	var bsonResult bson.Raw
 	if len(flatArgs) > 0 {
 		wasmArgs := make([]interface{}, 0, len(flatArgs))
 		for _, arg := range flatArgs {
@@ -129,16 +121,73 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 			}
 			wasmArgs = append(wasmArgs, json)
 		}
-		fmt.Println(wasmArgs)
 		marshalledArgs, _ := bson.Marshal(map[string]interface{}{"args": wasmArgs})
-		result := wasmFunction.callFunction(wasmFunction.functionName, marshalledArgs)
-		fmt.Println(result)
+		bsonResult = wasmFunction.callFunction(wasmFunction.functionName, marshalledArgs)
 	} else {
-		result := wasmFunction.callFunction(wasmFunction.functionName, []byte{})
-		fmt.Println(result)
+		bsonResult = wasmFunction.callFunction(wasmFunction.functionName, []byte{})
 	}
 
-	return makeValueBoolean(false), nil
+	val, err := bsonToValue(bsonResult.Lookup("result"))
+
+	return val, err
+}
+
+type wasmError struct {
+	field string
+}
+
+func (e *wasmError) Error() string {
+	return e.field
+}
+
+func bsonToValue(bson bson.RawValue) (value, error) {
+	switch bson.Type {
+	case '\x01':
+		return makeValueNumber(bson.Double()), nil
+	case '\x02':
+		return makeValueString(bson.StringValue()), nil
+	case '\x03':
+		resultFields := make(simpleObjectFieldMap)
+		fields, err := bson.Document().Elements()
+		if err != nil {
+			return nil, err
+		}
+		for _, field := range fields {
+			fieldValue, err := bsonToValue(field.Value())
+			if err != nil {
+				return nil, err
+			}
+			resultFields[field.Key()] = simpleObjectField{hide: ast.ObjectFieldVisible, field: &readyValue{fieldValue}}
+		}
+		var asserts []unboundField
+		var locals []objectLocal
+		var bindingFrame = make(bindingFrame)
+		return makeValueSimpleObject(bindingFrame, resultFields, asserts, locals), nil
+	case '\x04':
+		var resultElements []*cachedThunk
+		elements, err := bson.Array().Elements()
+		if err != nil {
+			return nil, err
+		}
+		for _, element := range elements {
+			elementValue, err := bsonToValue(element.Value())
+			if err != nil {
+				return nil, err
+			}
+			resultElements = append(resultElements, readyThunk(elementValue))
+		}
+		return makeValueArray(resultElements), nil
+	case '\x08':
+		return makeValueBoolean(bson.Boolean()), nil
+	case '\x0A':
+		return makeValueNull(), nil
+	case '\x10':
+		return makeValueNumber(float64(bson.Int32())), nil
+	case '\x12':
+		return int64ToValue(bson.Int64()), nil
+	default:
+		return makeValueString("error"), &wasmError{field: fmt.Sprintf("couldn't serialize field of type %v", bson.Type)}
+	}
 }
 
 func (wasmFunction *wasmFunction) parameters() []namedParameter {
