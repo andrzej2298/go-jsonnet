@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
-	"path"
 	"strings"
 
 	"github.com/google/go-jsonnet/ast"
@@ -12,22 +11,37 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []byte) bson.Raw {
+func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []byte) (bson.Raw, error) {
 	return callFunction(wasmFunction.wasmerInstance, functionName, arguments)
 }
 
-func callFunction(wasmerInstance *wasmer.Instance, functionName string, arguments []byte) bson.Raw {
-	allocate, _ := wasmerInstance.Exports.GetFunction("__jsonnet_internal_allocate")
-	deallocate, _ := wasmerInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
-	memoryExport, _ := wasmerInstance.Exports.GetMemory("memory")
-	function, _ := wasmerInstance.Exports.GetFunction(functionName)
+func callFunction(wasmerInstance *wasmer.Instance, functionName string, arguments []byte) (bson.Raw, error) {
+	allocate, err := wasmerInstance.Exports.GetFunction("__jsonnet_internal_allocate")
+	if err != nil {
+		return nil, err
+	}
+	deallocate, err := wasmerInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
+	if err != nil {
+		return nil, err
+	}
+	memoryExport, err := wasmerInstance.Exports.GetMemory("memory")
+	if err != nil {
+		return nil, err
+	}
+	function, err := wasmerInstance.Exports.GetFunction(functionName)
+	if err != nil {
+		return nil, err
+	}
 	var bsonResult interface{}
 
 	if len(arguments) > 0 {
 		argumentsLen := len(arguments)
 
 		// prepare input
-		allocateResult, _ := allocate(argumentsLen)
+		allocateResult, err := allocate(argumentsLen)
+		if err != nil {
+			return nil, err
+		}
 		inputPointer := allocateResult.(int32)
 		inputMemoryChunk := memoryExport.Data()[inputPointer:]
 
@@ -35,10 +49,16 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 			inputMemoryChunk[i] = arguments[i]
 		}
 		// get output
-		bsonResult, _ = function(inputPointer)
-		// deallocate(inputPointer, argumentsLen)
+		bsonResult, err = function(inputPointer)
+		if err != nil {
+			return nil, err
+		}
+		// TODO - deallocate(inputPointer, argumentsLen)?
 	} else {
-		bsonResult, _ = function()
+		bsonResult, err = function()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// parse output
@@ -49,7 +69,7 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 	var raw bson.Raw = outputMemoryChunk
 
 	deallocate(outputPointer, outputSize)
-	return raw
+	return raw, nil
 }
 
 type wasmFunction struct {
@@ -58,7 +78,7 @@ type wasmFunction struct {
 	params         ast.Identifiers
 }
 
-func makeWasmerInstance(fileDir, fileName string) (*wasmer.Instance, []string) {
+func makeWasmerInstance(filePath string) (*wasmer.Instance, []string, error) {
 	// Create an engine. It's responsible for driving the compilation and the
 	// execution of a WebAssembly module.
 	engine := wasmer.NewEngine()
@@ -66,19 +86,32 @@ func makeWasmerInstance(fileDir, fileName string) (*wasmer.Instance, []string) {
 	// Create a store, that holds the engine.
 	store := wasmer.NewStore(engine)
 
-	dir, _ := path.Split(fileDir)
-
-	data, _ := ioutil.ReadFile(dir + fileName)
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Create a new module from the file with the lib.
-	module, _ := wasmer.NewModule(
+	module, err := wasmer.NewModule(
 		store,
 		data,
 	)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	wasiEnv, _ := wasmer.NewWasiStateBuilder("wasi-test-program").Environment("RUST_BACKTRACE", "full").Finalize()
-	importObject, _ := wasiEnv.GenerateImportObject(store, module)
-	instance, _ := wasmer.NewInstance(module, importObject)
+	wasiEnv, err := wasmer.NewWasiStateBuilder("wasi-test-program").Environment("RUST_BACKTRACE", "full").Finalize()
+	if err != nil {
+		return nil, nil, err
+	}
+	importObject, err := wasiEnv.GenerateImportObject(store, module)
+	if err != nil {
+		return nil, nil, err
+	}
+	instance, err := wasmer.NewInstance(module, importObject)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var functionNames []string
 
@@ -89,20 +122,26 @@ func makeWasmerInstance(fileDir, fileName string) (*wasmer.Instance, []string) {
 		}
 	}
 
-	return instance, functionNames
+	return instance, functionNames, nil
 }
 
-func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) *wasmFunction {
+func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wasmFunction, error) {
 	metadataFunction := fmt.Sprintf("__jsonnet_internal_meta_%v", functionName)
-	result := callFunction(wasmerInstance, metadataFunction, []byte{})
+	result, err := callFunction(wasmerInstance, metadataFunction, []byte{})
+	if err != nil {
+		return nil, err
+	}
 	var paramNames []ast.Identifier
-	_ = result.Lookup("res").Unmarshal(&paramNames)
+	err = result.Lookup("res").Unmarshal(&paramNames)
+	if err != nil {
+		return nil, err
+	}
 
 	return &wasmFunction{
 		functionName:   functionName,
 		wasmerInstance: wasmerInstance,
 		params:         paramNames,
-	}
+	}, nil
 }
 
 func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpreter) (value, error) {
@@ -121,15 +160,23 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 			}
 			wasmArgs = append(wasmArgs, json)
 		}
-		marshalledArgs, _ := bson.Marshal(map[string]interface{}{"args": wasmArgs})
-		bsonResult = wasmFunction.callFunction(wasmFunction.functionName, marshalledArgs)
+		marshalledArgs, err := bson.Marshal(map[string]interface{}{"args": wasmArgs})
+		if err != nil {
+			return nil, err
+		}
+		bsonResult, err = wasmFunction.callFunction(wasmFunction.functionName, marshalledArgs)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		bsonResult = wasmFunction.callFunction(wasmFunction.functionName, []byte{})
+		var err error
+		bsonResult, err = wasmFunction.callFunction(wasmFunction.functionName, []byte{})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	val, err := bsonToValue(bsonResult.Lookup("result"))
-
-	return val, err
+	return bsonToValue(bsonResult.Lookup("result"))
 }
 
 type wasmError struct {
@@ -186,7 +233,7 @@ func bsonToValue(bson bson.RawValue) (value, error) {
 	case '\x12':
 		return int64ToValue(bson.Int64()), nil
 	default:
-		return makeValueString("error"), &wasmError{field: fmt.Sprintf("couldn't serialize field of type %v", bson.Type)}
+		return nil, &wasmError{field: fmt.Sprintf("couldn't serialize field of type %v", bson.Type)}
 	}
 }
 

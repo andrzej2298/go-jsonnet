@@ -490,19 +490,7 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 
 	case *ast.ImportWASM:
 		codePath := node.Loc().FileName
-		wasmerInstance, functionNames := makeWasmerInstance(codePath, node.File.Value)
-		fields := make(simpleObjectFieldMap)
-
-		for _, functionName := range functionNames {
-			fields[functionName] = simpleObjectField{hide: ast.ObjectFieldVisible, field: &readyValue{&valueFunction{
-				ec: makeWASMFunction(functionName, wasmerInstance),
-			}}}
-		}
-
-		var asserts []unboundField
-		var locals []objectLocal
-		var bindingFrame = make(bindingFrame)
-		return makeValueSimpleObject(bindingFrame, fields, asserts, locals), nil
+		return i.importCache.importWASM(codePath, node.File.Value, i)
 
 	case *ast.LiteralBoolean:
 		return makeValueBoolean(node.Value), nil

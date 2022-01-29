@@ -140,12 +140,42 @@ func (cache *importCache) importString(importedFrom, importedPath string, i *int
 }
 
 // ImportWASM imports a string, caches it and then returns it.
-func (cache *importCache) importWASM(importedFrom, importedPath string, i *interpreter) (valueString, error) {
-	data, _, err := cache.importData(importedFrom, importedPath)
-	if err != nil {
-		return nil, i.Error(err.Error())
+func (cache *importCache) importWASM(importedFrom, importedPath string, i *interpreter) (value, error) {
+	dir, _ := path.Split(importedFrom)
+	var absPath string
+	if path.IsAbs(importedPath) {
+		absPath = importedPath
+	} else {
+		absPath = path.Join(dir, importedPath)
 	}
-	return makeValueString(data.String()), nil
+
+	var pv potentialValue
+	if cachedNode, isCached := cache.codeCache[absPath]; !isCached {
+		wasmerInstance, functionNames, err := makeWasmerInstance(absPath)
+		if err != nil {
+			return nil, err
+		}
+		fields := make(simpleObjectFieldMap)
+
+		for _, functionName := range functionNames {
+			evalCallable, err := makeWASMFunction(functionName, wasmerInstance)
+			if err != nil {
+				return nil, err
+			}
+			fields[functionName] = simpleObjectField{hide: ast.ObjectFieldVisible, field: &readyValue{&valueFunction{
+				ec: evalCallable,
+			}}}
+		}
+
+		var asserts []unboundField
+		var locals []objectLocal
+		var bindingFrame = make(bindingFrame)
+		pv = readyThunk(makeValueSimpleObject(bindingFrame, fields, asserts, locals))
+		cache.codeCache[absPath] = pv
+	} else {
+		pv = cachedNode
+	}
+	return i.evaluatePV(pv)
 }
 
 func nodeToPV(i *interpreter, filename string, node ast.Node) *cachedThunk {
