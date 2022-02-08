@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/google/go-jsonnet/ast"
 	"github.com/google/go-jsonnet/astgen"
@@ -482,7 +484,11 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 
 	case *ast.Import:
 		codePath := node.Loc().FileName
-		return i.importCache.importCode(codePath, node.File.Value, i)
+		timeBefore := time.Now()
+		res, err := i.importCache.importCode(codePath, node.File.Value, i)
+		fmt.Fprintf(os.Stderr, "normal import time diff: %v\n", time.Now().Sub(timeBefore))
+
+		return res, err
 
 	case *ast.ImportStr:
 		codePath := node.Loc().FileName
@@ -490,7 +496,11 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 
 	case *ast.ImportWASM:
 		codePath := node.Loc().FileName
-		return i.importCache.importWASM(codePath, node.File.Value, i)
+		timeBefore := time.Now()
+		res, err := i.importCache.importWASM(codePath, node.File.Value, i)
+		fmt.Fprintf(os.Stderr, "WASM import time diff: %v\n", time.Now().Sub(timeBefore))
+
+		return res, err
 
 	case *ast.LiteralBoolean:
 		return makeValueBoolean(node.Value), nil
@@ -567,6 +577,8 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 		}, nil
 
 	case *ast.Apply:
+		timeBefore := time.Now()
+
 		// Eval target
 		target, err := i.evaluate(node.Target, nonTailCall)
 		if err != nil {
@@ -591,7 +603,11 @@ func (i *interpreter) evaluate(a ast.Node, tc tailCallStatus) (value, error) {
 		for i, arg := range node.Arguments.Named {
 			arguments.named[i] = namedCallArgument{name: arg.Name, pv: &cachedThunk{env: &argEnv, body: arg.Arg}}
 		}
-		return i.evaluateTailCall(function, arguments, tc)
+		res, err := i.evaluateTailCall(function, arguments, tc)
+
+		fmt.Fprintf(os.Stderr, "function (%d, %d, %+v) call diff: %v\n", node.Target.Loc().Begin.Line, node.Target.Loc().Begin.Column, node.LocRange, time.Now().Sub(timeBefore))
+
+		return res, err
 
 	case *astMakeArrayElement:
 		arguments := callArguments{
