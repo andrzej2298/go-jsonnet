@@ -139,7 +139,7 @@ func (cache *importCache) importString(importedFrom, importedPath string, i *int
 	return makeValueString(data.String()), nil
 }
 
-// ImportWASM imports a string, caches it and then returns it.
+// ImportWASM imports a WASM library from a path.
 func (cache *importCache) importWASM(importedFrom, importedPath string, i *interpreter) (value, error) {
 	dir, _ := path.Split(importedFrom)
 	var absPath string
