@@ -165,6 +165,9 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 			return nil, err
 		}
 		bsonResult, err = wasmFunction.callFunction(wasmFunction.functionName, marshalledArgs)
+		// TODO suppress direct error messages
+		// 		and capture to proper runtime errors
+		//		everywhere
 		if err != nil {
 			return nil, err
 		}

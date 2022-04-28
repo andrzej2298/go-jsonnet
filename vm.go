@@ -73,7 +73,7 @@ type vmExtMap map[string]vmExt
 func MakeVM() *VM {
 	defaultImporter := &FileImporter{}
 	return &VM{
-		MaxStack:       500,
+		MaxStack:       1000,
 		ext:            make(vmExtMap),
 		tla:            make(vmExtMap),
 		nativeFuncs:    make(map[string]*NativeFunction),
