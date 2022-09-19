@@ -16,7 +16,6 @@ func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []
 }
 
 func callFunction(wasmerInstance *wasmer.Instance, functionName string, argumentBuffer []byte) (bson.Raw, error) {
-	fmt.Printf("callFunction %s\n", functionName)
 	allocate, err := wasmerInstance.Exports.GetFunction("__jsonnet_internal_allocate")
 	if err != nil {
 		return nil, err
@@ -69,7 +68,6 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 	var raw bson.Raw = outputMemoryChunk
 
 	deallocate(outputPointer, outputSize)
-	fmt.Println("after deallocate")
 	return raw, nil
 }
 
@@ -120,7 +118,6 @@ func makeWasmerInstance(filePath string) (*wasmer.Instance, []string, error) {
 	// lookup all function names in the module (only exported functions, ie. those that have a "__jsonnet_export_" prefix)
 	for _, v := range module.Exports() {
 		if v.Type().Kind().String() == "func" && strings.HasPrefix(v.Name(), "__jsonnet_export_") {
-			fmt.Printf("function: %s\n", v.Name())
 			functionNames = append(functionNames, strings.TrimPrefix(v.Name(), "__jsonnet_export_"))
 		}
 	}
@@ -129,16 +126,12 @@ func makeWasmerInstance(filePath string) (*wasmer.Instance, []string, error) {
 }
 
 func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wasmFunction, error) {
-	fmt.Println("before meta call")
 	metadataFunction := fmt.Sprintf("__jsonnet_internal_meta_%v", functionName)
 	result, err := callFunction(wasmerInstance, metadataFunction, []byte{})
-	fmt.Println("after meta call")
 	if err != nil {
 		return nil, err
 	}
 	var paramNames []ast.Identifier
-	fmt.Println(result)
-	fmt.Println(result.Lookup("res"))
 	err = result.Lookup("res").Unmarshal(&paramNames)
 	if err != nil {
 		return nil, err
@@ -152,14 +145,7 @@ func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wa
 }
 
 func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpreter) (value, error) {
-	fmt.Println("before actual call")
 	flatArgs := flattenArgs(arguments, wasmFunction.parameters(), []value{})
-	fmt.Printf("wasm arguments %v\n", wasmFunction.params)
-	fmt.Printf("named arguments %v\n", arguments.named)
-	fmt.Printf("positional arguments %v\n", arguments.positional)
-	for _, v := range arguments.positional {
-		fmt.Printf("positional argument %v\n", v)
-	}
 	var bsonResult bson.Raw
 	exportedFunctionName := "__jsonnet_export_" + wasmFunction.functionName
 	if len(flatArgs) > 0 {
@@ -175,7 +161,6 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 			}
 			wasmArgs[string(wasmFunction.params[index])] = json
 		}
-		fmt.Printf("ready to marshal %v\n", wasmArgs)
 		marshalledArgs, err := bson.Marshal(wasmArgs)
 		if err != nil {
 			return nil, err
@@ -192,7 +177,6 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 		}
 	}
 
-	fmt.Println("after actual call")
 	return bsonToValue(bsonResult.Lookup("result"))
 }
 
