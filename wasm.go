@@ -6,55 +6,61 @@ import (
 	"io/ioutil"
 	"strings"
 
+	"github.com/bytecodealliance/wasmtime-go"
 	"github.com/google/go-jsonnet/ast"
-	"github.com/wasmerio/wasmer-go/wasmer"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []byte) (bson.Raw, error) {
-	return callFunction(wasmFunction.runtimeInstance, functionName, arguments)
+	return callFunction(wasmFunction.runtimeInstance, wasmFunction.store, functionName, arguments)
 }
 
-func callFunction(runtimeInstance *wasmer.Instance, functionName string, argumentBuffer []byte) (bson.Raw, error) {
-	allocate, err := runtimeInstance.Exports.GetFunction("__jsonnet_internal_allocate")
-	if err != nil {
-		return nil, err
+func callFunction(runtimeInstance *wasmtime.Instance, store *wasmtime.Store, functionName string, argumentBuffer []byte) (bson.Raw, error) {
+	allocate := runtimeInstance.GetFunc(store, "__jsonnet_internal_allocate")
+	if allocate == nil {
+		return nil, &wasmError{"allocation function not found in module"}
 	}
-	deallocate, err := runtimeInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
-	if err != nil {
-		return nil, err
+	deallocate := runtimeInstance.GetFunc(store, "__jsonnet_internal_deallocate")
+	if deallocate == nil {
+		return nil, &wasmError{"deallocation function not found in module"}
 	}
-	memoryExport, err := runtimeInstance.Exports.GetMemory("memory")
-	if err != nil {
-		return nil, err
+	memoryExport := runtimeInstance.GetExport(store, "memory")
+	if memoryExport == nil {
+		return nil, &wasmError{"memory not found in module"}
 	}
-	function, err := runtimeInstance.Exports.GetFunction(functionName)
-	if err != nil {
-		return nil, err
+	memory := memoryExport.Memory()
+	if memory == nil {
+		return nil, &wasmError{"memory not found in module"}
+	}
+
+	function := runtimeInstance.GetFunc(store, functionName)
+	if function == nil {
+		return nil, &wasmError{fmt.Sprintf("function %s not found in module", functionName)}
 	}
 	var bsonResult interface{}
+	var err error
 
 	if len(argumentBuffer) > 0 {
 		argumentsLen := len(argumentBuffer)
 
 		// prepare input
-		allocateResult, err := allocate(argumentsLen)
+		allocateResult, err := allocate.Call(store, argumentsLen)
 		if err != nil {
 			return nil, err
 		}
 		inputPointer := allocateResult.(int32)
-		inputMemoryChunk := memoryExport.Data()[inputPointer:]
+		inputMemoryChunk := memory.UnsafeData(store)[inputPointer:]
 
 		for i := 0; i < argumentsLen; i++ {
 			inputMemoryChunk[i] = argumentBuffer[i]
 		}
 		// get output
-		bsonResult, err = function(inputPointer)
+		bsonResult, err = function.Call(store, inputPointer)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		bsonResult, err = function()
+		bsonResult, err = function.Call(store)
 		if err != nil {
 			return nil, err
 		}
@@ -62,73 +68,70 @@ func callFunction(runtimeInstance *wasmer.Instance, functionName string, argumen
 
 	// parse output
 	outputPointer := bsonResult.(int32)
-	outputMemoryChunk := memoryExport.Data()[outputPointer:]
+	outputMemoryChunk := memory.UnsafeData(store)[outputPointer:]
 	outputSize := binary.LittleEndian.Uint32(outputMemoryChunk)
 
-	// TODO: copy?
-	var raw bson.Raw = outputMemoryChunk
+	copiedMemory := make([]byte, outputSize)
+	copy(copiedMemory, outputMemoryChunk)
+	var raw bson.Raw = copiedMemory
 
-	deallocate(outputPointer, outputSize)
+	deallocate.Call(store, outputPointer, outputSize)
 	return raw, nil
 }
 
 type wasmFunction struct {
 	functionName   string
-	runtimeInstance *wasmer.Instance
+	runtimeInstance *wasmtime.Instance
+	store *wasmtime.Store
 	params         ast.Identifiers
 }
 
-func makeRuntimeInstance(filePath string) (*wasmer.Instance, []string, error) {
-	// Create an engine. It's responsible for driving the compilation and the
-	// execution of a WebAssembly module.
-	engine := wasmer.NewEngine()
-
-	// Create a store, that holds the engine.
-	store := wasmer.NewStore(engine)
+func makeRuntimeInstance(filePath string) (*wasmtime.Instance, *wasmtime.Store, []string, error) {
+	engine := wasmtime.NewEngine()
 
 	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Create a new module from the file with the lib.
-	module, err := wasmer.NewModule(
-		store,
+	module, err := wasmtime.NewModule(
+		engine,
 		data,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// wasiEnv, err := wasmer.NewWasiStateBuilder("wasi-test-program").Environment("RUST_BACKTRACE", "full").CaptureStdout().CaptureStderr().Finalize()
-	wasiEnv, err := wasmer.NewWasiStateBuilder("wasi-test-program").Environment("RUST_BACKTRACE", "full").Finalize()
+	linker := wasmtime.NewLinker(engine)
+	err = linker.DefineWasi()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	importObject, err := wasiEnv.GenerateImportObject(store, module)
+
+	wasiConfig := wasmtime.NewWasiConfig()
+	store := wasmtime.NewStore(engine)
+	store.SetWasi(wasiConfig)
+	instance, err := linker.Instantiate(store, module)
 	if err != nil {
-		return nil, nil, err
-	}
-	instance, err := wasmer.NewInstance(module, importObject)
-	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var functionNames []string
 
 	// lookup all function names in the module (only exported functions, ie. those that have a "__jsonnet_export_" prefix)
 	for _, v := range module.Exports() {
-		if v.Type().Kind().String() == "func" && strings.HasPrefix(v.Name(), "__jsonnet_export_") {
+		if v.Type().FuncType() != nil && strings.HasPrefix(v.Name(), "__jsonnet_export_") {
 			functionNames = append(functionNames, strings.TrimPrefix(v.Name(), "__jsonnet_export_"))
 		}
 	}
 
-	return instance, functionNames, nil
+	return instance, store, functionNames, nil
 }
 
-func makeWASMFunction(functionName string, runtimeInstance *wasmer.Instance) (*wasmFunction, error) {
+func makeWASMFunction(functionName string, runtimeInstance *wasmtime.Instance, store *wasmtime.Store) (*wasmFunction, error) {
 	metadataFunction := fmt.Sprintf("__jsonnet_internal_meta_%v", functionName)
-	result, err := callFunction(runtimeInstance, metadataFunction, []byte{})
+	result, err := callFunction(runtimeInstance, store, metadataFunction, []byte{})
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +144,7 @@ func makeWASMFunction(functionName string, runtimeInstance *wasmer.Instance) (*w
 	return &wasmFunction{
 		functionName:   functionName,
 		runtimeInstance: runtimeInstance,
+		store: store,
 		params:         paramNames,
 	}, nil
 }

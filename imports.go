@@ -151,14 +151,14 @@ func (cache *importCache) importWASM(importedFrom, importedPath string, i *inter
 
 	var pv potentialValue
 	if cachedNode, isCached := cache.codeCache[absPath]; !isCached {
-		wasmerInstance, functionNames, err := makeRuntimeInstance(absPath)
+		runtimeInstance, store, functionNames, err := makeRuntimeInstance(absPath)
 		if err != nil {
 			return nil, err
 		}
 		fields := make(simpleObjectFieldMap)
 
 		for _, functionName := range functionNames {
-			evalCallable, err := makeWASMFunction(functionName, wasmerInstance)
+			evalCallable, err := makeWASMFunction(functionName, runtimeInstance, store)
 			if err != nil {
 				return nil, err
 			}
