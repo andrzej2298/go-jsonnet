@@ -65,6 +65,7 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 	outputMemoryChunk := memoryExport.Data()[outputPointer:]
 	outputSize := binary.LittleEndian.Uint32(outputMemoryChunk)
 
+	// TODO: copy?
 	var raw bson.Raw = outputMemoryChunk
 
 	deallocate(outputPointer, outputSize)
@@ -132,7 +133,7 @@ func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wa
 		return nil, err
 	}
 	var paramNames []ast.Identifier
-	err = result.Lookup("res").Unmarshal(&paramNames)
+	err = result.Lookup("").Unmarshal(&paramNames)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +178,7 @@ func (wasmFunction *wasmFunction) evalCall(arguments callArguments, i *interpret
 		}
 	}
 
-	return bsonToValue(bsonResult.Lookup("result"))
+	return bsonToValue(bsonResult.Lookup(""))
 }
 
 type wasmError struct {
