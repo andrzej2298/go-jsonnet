@@ -12,23 +12,23 @@ import (
 )
 
 func (wasmFunction *wasmFunction) callFunction(functionName string, arguments []byte) (bson.Raw, error) {
-	return callFunction(wasmFunction.wasmerInstance, functionName, arguments)
+	return callFunction(wasmFunction.runtimeInstance, functionName, arguments)
 }
 
-func callFunction(wasmerInstance *wasmer.Instance, functionName string, argumentBuffer []byte) (bson.Raw, error) {
-	allocate, err := wasmerInstance.Exports.GetFunction("__jsonnet_internal_allocate")
+func callFunction(runtimeInstance *wasmer.Instance, functionName string, argumentBuffer []byte) (bson.Raw, error) {
+	allocate, err := runtimeInstance.Exports.GetFunction("__jsonnet_internal_allocate")
 	if err != nil {
 		return nil, err
 	}
-	deallocate, err := wasmerInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
+	deallocate, err := runtimeInstance.Exports.GetFunction("__jsonnet_internal_deallocate")
 	if err != nil {
 		return nil, err
 	}
-	memoryExport, err := wasmerInstance.Exports.GetMemory("memory")
+	memoryExport, err := runtimeInstance.Exports.GetMemory("memory")
 	if err != nil {
 		return nil, err
 	}
-	function, err := wasmerInstance.Exports.GetFunction(functionName)
+	function, err := runtimeInstance.Exports.GetFunction(functionName)
 	if err != nil {
 		return nil, err
 	}
@@ -74,11 +74,11 @@ func callFunction(wasmerInstance *wasmer.Instance, functionName string, argument
 
 type wasmFunction struct {
 	functionName   string
-	wasmerInstance *wasmer.Instance
+	runtimeInstance *wasmer.Instance
 	params         ast.Identifiers
 }
 
-func makeWasmerInstance(filePath string) (*wasmer.Instance, []string, error) {
+func makeRuntimeInstance(filePath string) (*wasmer.Instance, []string, error) {
 	// Create an engine. It's responsible for driving the compilation and the
 	// execution of a WebAssembly module.
 	engine := wasmer.NewEngine()
@@ -126,9 +126,9 @@ func makeWasmerInstance(filePath string) (*wasmer.Instance, []string, error) {
 	return instance, functionNames, nil
 }
 
-func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wasmFunction, error) {
+func makeWASMFunction(functionName string, runtimeInstance *wasmer.Instance) (*wasmFunction, error) {
 	metadataFunction := fmt.Sprintf("__jsonnet_internal_meta_%v", functionName)
-	result, err := callFunction(wasmerInstance, metadataFunction, []byte{})
+	result, err := callFunction(runtimeInstance, metadataFunction, []byte{})
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func makeWASMFunction(functionName string, wasmerInstance *wasmer.Instance) (*wa
 
 	return &wasmFunction{
 		functionName:   functionName,
-		wasmerInstance: wasmerInstance,
+		runtimeInstance: runtimeInstance,
 		params:         paramNames,
 	}, nil
 }

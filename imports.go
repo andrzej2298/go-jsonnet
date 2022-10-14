@@ -151,7 +151,7 @@ func (cache *importCache) importWASM(importedFrom, importedPath string, i *inter
 
 	var pv potentialValue
 	if cachedNode, isCached := cache.codeCache[absPath]; !isCached {
-		wasmerInstance, functionNames, err := makeWasmerInstance(absPath)
+		wasmerInstance, functionNames, err := makeRuntimeInstance(absPath)
 		if err != nil {
 			return nil, err
 		}
