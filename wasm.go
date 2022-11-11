@@ -82,7 +82,9 @@ type wasmFunction struct {
 }
 
 func makeRuntimeInstance(filePath string) (*wasmer.Instance, *wasmer.Store, []string, error) {
-	engine := wasmer.NewEngine()
+	config := wasmer.NewConfig()
+
+	engine := wasmer.NewEngineWithConfig(config)
 
 	store := wasmer.NewStore(engine)
 
