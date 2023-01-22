@@ -292,6 +292,21 @@ func (vm *VM) findDependencies(filePath string, node *ast.Node, dependencies map
 			}
 		}
 		dependencies[cleanedAbsPath] = struct{}{}
+	case *ast.ImportWASM:
+		foundAt, err := vm.ResolveImport(filePath, i.File.Value)
+		if err != nil {
+			*stackTrace = append([]traceFrame{{Loc: *i.Loc()}}, *stackTrace...)
+			return err
+		}
+		cleanedAbsPath = foundAt
+		if _, isFileImporter := vm.importer.(*FileImporter); isFileImporter {
+			cleanedAbsPath, err = getAbsPath(foundAt)
+			if err != nil {
+				*stackTrace = append([]traceFrame{{Loc: *i.Loc()}}, *stackTrace...)
+				return err
+			}
+		}
+		dependencies[cleanedAbsPath] = struct{}{}
 	default:
 		for _, node := range parser.Children(i) {
 			err = vm.findDependencies(filePath, &node, dependencies, stackTrace)

@@ -423,6 +423,14 @@ type ImportStr struct {
 
 // ---------------------------------------------------------------------------
 
+// ImportWASM represents importwasm "file".
+type ImportWASM struct {
+	NodeBase
+	File *LiteralString
+}
+
+// ---------------------------------------------------------------------------
+
 // Index represents both e[e] and the syntax sugar e.f.
 //
 // One of index and id will be nil before desugaring.  After desugaring id

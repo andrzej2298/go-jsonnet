@@ -39,6 +39,7 @@ type valueType struct {
 var stringType = &valueType{"string"}
 var numberType = &valueType{"number"}
 var functionType = &valueType{"function"}
+var wasmFunctionType = &valueType{"wasmfunction"}
 var objectType = &valueType{"object"}
 var booleanType = &valueType{"boolean"}
 var nullType = &valueType{"null"}

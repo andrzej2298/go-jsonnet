@@ -169,6 +169,13 @@ func clone(astPtr *Node) {
 		r.File = new(LiteralString)
 		*r.File = *node.File
 
+	case *ImportWASM:
+		r := new(ImportWASM)
+		*astPtr = r
+		*r = *node
+		r.File = new(LiteralString)
+		*r.File = *node.File
+
 	case *Index:
 		r := new(Index)
 		*astPtr = r
